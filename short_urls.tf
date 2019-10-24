@@ -1,28 +1,23 @@
-data "archive_file" "apply_security_headers" {
+data "archive_file" "add_object_url" {
     type        = "zip"
-    source_dir  = "lambda_functions/apply_security_headers"
-    output_path = "lambda_functions/apply_security_headers.zip"
+    source_dir  = "lambda_functions/add_object_url"
+    output_path = "lambda_functions/add_object_url.zip"
 }
 
-data "archive_file" "create_shorturl" {
+data "archive_file" "del_object_url" {
     type        = "zip"
-    source_dir  = "lambda_functions/create_shorturl"
-    output_path = "lambda_functions/create_shorturl.zip"
-}
-
-data "archive_file" "delete_shorturl" {
-    type        = "zip"
-    source_dir  = "lambda_functions/delete_shorturl"
-    output_path = "lambda_functions/delete_shorturl.zip"
+    source_dir  = "lambda_functions/del_object_url"
+    output_path = "lambda_functions/del_object_url.zip"
 }
 
 resource "aws_s3_bucket" "short_urls_bucket" {
-  bucket = "${var.short_url_domain}"
-  acl    = "public-read"
+  bucket        = "${var.short_url_domain}"
+  acl           = "public-read"
+  # force_destroy = true
 
   website {
-    index_document = "index.html"
-    error_document = "error.html"
+    index_document = "web"
+    error_document = "error"
   }
   tags = {
     Project = "short_urls"
@@ -45,37 +40,6 @@ resource "aws_iam_role" "short_url_lambda_iam" {
       },
       "Effect": "Allow",
       "Sid": ""
-    }
-  ]
-}
-EOF
-}
-
-resource "aws_iam_role_policy" "short_url_lambda_policy" {
-  name = "short_url_lambda_policy"
-  role = "${aws_iam_role.short_url_lambda_iam.id}"
-
-  policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "Stm1",
-      "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "arn:aws:logs:*:*:*"
-    },
-    {
-      "Sid": "Stm2",
-      "Effect": "Allow",
-      "Action": [
-        "lambda:GetFunction"
-      ],
-      "Resource": "${aws_lambda_function.apply_security_headers.arn}:*"
     }
   ]
 }
@@ -110,35 +74,45 @@ resource "aws_iam_policy" "short_url_s3_policy" {
 EOF
 }
 
+resource "aws_iam_policy" "short_url_ssm_policy" {
+  name        = "short_url_ssm_policy"
+  description = "Short URL SSM policy"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+}
+
 resource "aws_iam_role_policy_attachment" "short_url_lambda_policy_s3_policy_attachment" {
     role       = "${aws_iam_role.short_url_lambda_iam.name}"
     policy_arn = "${aws_iam_policy.short_url_s3_policy.arn}"
 }
 
-resource "aws_lambda_function" "apply_security_headers" {
-  provider         = "aws.cloudfront_acm"
-  filename         = "lambda_functions/apply_security_headers.zip"
-  function_name    = "apply_security_headers"
-  role             = "${aws_iam_role.short_url_lambda_iam.arn}"
-  handler          = "lambda_function.handler"
-  source_code_hash = "${data.archive_file.apply_security_headers.output_base64sha256}"
-  runtime          = "nodejs8.10"
-  publish          = true
-  tags = {
-    Project = "short_urls"
-  }
+resource "aws_iam_role_policy_attachment" "short_url_lambda_policy_ssm_policy_attachment" {
+    role       = "${aws_iam_role.short_url_lambda_iam.name}"
+    policy_arn = "${aws_iam_policy.short_url_ssm_policy.arn}"
 }
 
-resource "aws_lambda_function" "short_url_create" {
-  filename         = "lambda_functions/create_shorturl.zip"
-  function_name    = "short_url_create"
+resource "aws_lambda_function" "add_object_url" {
+  filename         = "lambda_functions/add_object_url.zip"
+  function_name    = "add_object_url"
   role             = "${aws_iam_role.short_url_lambda_iam.arn}"
   handler          = "lambda_function.lambda_handler"
-  source_code_hash = "${data.archive_file.create_shorturl.output_base64sha256}"
-  runtime          = "python3.6"
+  source_code_hash = "${data.archive_file.add_object_url.output_base64sha256}"
+  runtime          = "python3.7"
   environment {
     variables = {
-      BUCKET_NAME = "${var.short_url_domain}"
+      DOMAIN  = "${var.short_url_domain}"
+      PRE     = "${replace(var.short_url_domain,".","")}"
     }
   }
   tags = {
@@ -146,16 +120,17 @@ resource "aws_lambda_function" "short_url_create" {
   }
 }
 
-resource "aws_lambda_function" "short_url_delete" {
-  filename         = "lambda_functions/delete_shorturl.zip"
-  function_name    = "short_url_delete"
+resource "aws_lambda_function" "del_object_url" {
+  filename         = "lambda_functions/del_object_url.zip"
+  function_name    = "del_object_url"
   role             = "${aws_iam_role.short_url_lambda_iam.arn}"
   handler          = "lambda_function.lambda_handler"
-  source_code_hash = "${data.archive_file.delete_shorturl.output_base64sha256}"
-  runtime          = "python3.6"
+  source_code_hash = "${data.archive_file.del_object_url.output_base64sha256}"
+  runtime          = "python3.7"
   environment {
     variables = {
-      BUCKET_NAME = "${var.short_url_domain}"
+      DOMAIN  = "${var.short_url_domain}",
+      PRE     = "${replace(var.short_url_domain,".","")}"
     }
   }
   tags = {
@@ -163,142 +138,82 @@ resource "aws_lambda_function" "short_url_delete" {
   }
 }
 
-resource "aws_api_gateway_rest_api" "short_urls_api_gateway" {
-  name        = "Short URLs API"
-  description = "API for managing short URLs."
-}
-resource "aws_api_gateway_usage_plan" "short_urls_admin_api_key_usage_plan" {
-  name         = "Short URLs admin API key usage plan"
-  description  = "Usage plan for the admin API key for Short URLS."
-  api_stages {
-    api_id = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-    stage  = "${aws_api_gateway_deployment.short_url_api_deployment.stage_name}"
+resource "aws_cloudwatch_event_rule" "add_object_url_rule" {
+  name        = "add_object_url_rule"
+  description = "Trigger lambda when changes are made to parameter store"
+
+  event_pattern = <<EOF
+{
+  "source": [
+    "aws.ssm"
+  ],
+  "detail-type": [
+    "Parameter Store Change"
+  ],
+  "detail": {
+    "operation": [
+      "Create",
+      "Update"
+    ]
   }
 }
-resource "aws_api_gateway_usage_plan_key" "short_urls_admin_api_key_usage_plan_key" {
-  key_id        = "${aws_api_gateway_api_key.short_urls_admin_api_key.id}"
-  key_type      = "API_KEY"
-  usage_plan_id = "${aws_api_gateway_usage_plan.short_urls_admin_api_key_usage_plan.id}"
+EOF
 }
 
-resource "aws_api_gateway_api_key" "short_urls_admin_api_key" {
-  name = "Short URLs Admin API Key"
-}
+resource "aws_cloudwatch_event_rule" "del_object_url_rule" {
+  name        = "del_object_url_rule"
+  description = "Trigger lambda when params are deleted"
 
-resource "aws_api_gateway_resource" "short_url_api_resource_admin" {
-  rest_api_id = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  parent_id   = "${aws_api_gateway_rest_api.short_urls_api_gateway.root_resource_id}"
-  path_part   = "admin"
-}
-
-resource "aws_api_gateway_resource" "short_url_api_resource_admin_delete" {
-  rest_api_id = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  parent_id   = "${aws_api_gateway_resource.short_url_api_resource_admin.id}"
-  path_part   = "{token+}"
-}
-
-resource "aws_api_gateway_method" "short_url_api_delete" {
-  rest_api_id   = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  resource_id   = "${aws_api_gateway_resource.short_url_api_resource_admin_delete.id}"
-  http_method   = "DELETE"
-  authorization = "NONE"
-  api_key_required = true
-}
-
-resource "aws_api_gateway_method_response" "short_url_api_delete_response" {
-  rest_api_id = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  resource_id = "${aws_api_gateway_resource.short_url_api_resource_admin_delete.id}"
-  http_method = "${aws_api_gateway_method.short_url_api_delete.http_method}"
-  status_code = "200"
-  response_models = {
-     "application/json" = "Empty"
+  event_pattern = <<EOF
+{
+  "source": [
+    "aws.ssm"
+  ],
+  "detail-type": [
+    "Parameter Store Change"
+  ],
+  "detail": {
+    "operation": [
+      "Delete"
+    ]
   }
 }
-
-resource "aws_api_gateway_integration" "short_url_api_delete_lambda" {
-  rest_api_id             = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  resource_id             = "${aws_api_gateway_resource.short_url_api_resource_admin_delete.id}"
-  http_method             = "${aws_api_gateway_method.short_url_api_delete.http_method}"
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = "arn:aws:apigateway:${var.region}:lambda:path/2015-03-31/functions/${aws_lambda_function.short_url_delete.arn}/invocations"
+EOF
 }
 
-resource "aws_api_gateway_integration_response" "short_url_api_delete_lambda_response" {
-  depends_on = ["aws_api_gateway_integration.short_url_api_delete_lambda"]
-  rest_api_id = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  resource_id = "${aws_api_gateway_resource.short_url_api_resource_admin_delete.id}"
-  http_method = "${aws_api_gateway_method.short_url_api_delete.http_method}"
-  status_code = "${aws_api_gateway_method_response.short_url_api_delete_response.status_code}"
-
-  response_templates = {
-    "application/json" = ""
-  } 
+resource "aws_cloudwatch_event_target" "add_object_url" {
+  target_id = "add_object_url"
+  rule      = "${aws_cloudwatch_event_rule.add_object_url_rule.name}"
+  arn       = "${aws_lambda_function.add_object_url.arn}"
 }
 
+resource "aws_cloudwatch_event_target" "del_object_url" {
+  target_id = "del_object_url"
+  rule      = "${aws_cloudwatch_event_rule.del_object_url_rule.name}"
+  arn       = "${aws_lambda_function.del_object_url.arn}"
+}
 
-resource "aws_lambda_permission" "short_url_lambda_permssion_short_url_delete" {
-  depends_on = ["aws_api_gateway_integration.short_url_api_delete_lambda", "aws_lambda_function.short_url_delete"]
-  statement_id  = "AllowExecutionFromAPIGateway2"
+resource "aws_lambda_permission" "allow_cloudwatch_add_object_url" {
+  statement_id  = "AllowExecutionFromCloudWatch"
   action        = "lambda:InvokeFunction"
-  function_name = "${aws_lambda_function.short_url_delete.arn}"
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "arn:aws:execute-api:${var.region}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.short_urls_api_gateway.id}/*/${aws_api_gateway_method.short_url_api_delete.http_method}${aws_api_gateway_resource.short_url_api_resource_admin.path}/*"
+  function_name = "${aws_lambda_function.add_object_url.function_name}"
+  principal     = "events.amazonaws.com"
+  source_arn    = "${aws_cloudwatch_event_rule.add_object_url_rule.arn}"
 }
 
-resource "aws_api_gateway_method" "short_url_api_post" {
-  rest_api_id   = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  resource_id   = "${aws_api_gateway_resource.short_url_api_resource_admin.id}"
-  http_method   = "POST"
-  authorization = "NONE"
-  api_key_required = true
-}
-
-resource "aws_api_gateway_integration" "short_url_api_post_lambda" {
-  rest_api_id             = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  resource_id             = "${aws_api_gateway_resource.short_url_api_resource_admin.id}"
-  http_method             = "${aws_api_gateway_method.short_url_api_post.http_method}"
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = "arn:aws:apigateway:${var.region}:lambda:path/2015-03-31/functions/${aws_lambda_function.short_url_create.arn}/invocations"
-}
-
-resource "aws_lambda_permission" "short_url_lambda_permssion_short_url_create" {
-  statement_id  = "AllowExecutionFromAPIGateway"
+resource "aws_lambda_permission" "allow_cloudwatch_del_object_url" {
+  statement_id  = "AllowExecutionFromCloudWatch"
   action        = "lambda:InvokeFunction"
-  function_name = "${aws_lambda_function.short_url_create.arn}"
-  principal     = "apigateway.amazonaws.com"
-  source_arn = "arn:aws:execute-api:${var.region}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.short_urls_api_gateway.id}/*/${aws_api_gateway_method.short_url_api_post.http_method}${aws_api_gateway_resource.short_url_api_resource_admin.path}"
-}
-
-resource "aws_lambda_permission" "short_url_lambda_permssion_apply_security_headers_edgelambda" {
-  provider      = "aws.cloudfront_acm"
-  statement_id  = "AllowExecutionFromCloudFront"
-  action        = "lambda:GetFunction"
-  function_name = "${aws_lambda_function.apply_security_headers.arn}"
-  principal     = "edgelambda.amazonaws.com"
-}
-
-resource "aws_lambda_permission" "short_url_lambda_permssion_apply_security_headers_lambda" {
-  provider      = "aws.cloudfront_acm"
-  statement_id  = "AllowExecutionFromCloudFront2"
-  action        = "lambda:GetFunction"
-  function_name = "${aws_lambda_function.apply_security_headers.arn}"
-  principal     = "lambda.amazonaws.com"
-}
-
-resource "aws_api_gateway_deployment" "short_url_api_deployment" {
-  depends_on = ["aws_api_gateway_integration.short_url_api_post_lambda", "aws_api_gateway_integration.short_url_api_delete_lambda"]
-
-  rest_api_id = "${aws_api_gateway_rest_api.short_urls_api_gateway.id}"
-  stage_name  = "Production"
+  function_name = "${aws_lambda_function.del_object_url.function_name}"
+  principal     = "events.amazonaws.com"
+  source_arn    = "${aws_cloudwatch_event_rule.del_object_url_rule.arn}"
 }
 
 resource "aws_acm_certificate" "short_url_domain_certificate" {
   provider          = "aws.cloudfront_acm"
   domain_name       = "${var.short_url_domain}"
   validation_method = "DNS"
-  tags {
+  tags = {
     Project = "short_urls"
   }
 }
@@ -334,7 +249,6 @@ resource "aws_acm_certificate_validation" "short_url_domain_cert" {
 }
 
 resource "aws_cloudfront_distribution" "short_urls_cloudfront" {
-  depends_on = ["aws_lambda_function.apply_security_headers"]
   provider = "aws.cloudfront_acm"
   enabled  = true
   aliases  = ["${var.short_url_domain}"]
@@ -344,18 +258,6 @@ resource "aws_cloudfront_distribution" "short_urls_cloudfront" {
 
     custom_origin_config {
       origin_protocol_policy = "http-only"
-      http_port              = "80"
-      https_port             = "443"
-      origin_ssl_protocols   = ["TLSv1.1"]
-    }
-  }
-  origin {
-    origin_id   = "origin-api-${aws_api_gateway_deployment.short_url_api_deployment.id}"
-    domain_name = "${replace(replace(aws_api_gateway_deployment.short_url_api_deployment.invoke_url,"/Production", ""), "https://", "")}"
-    origin_path = "/Production"
-
-    custom_origin_config {
-      origin_protocol_policy = "https-only"
       http_port              = "80"
       https_port             = "443"
       origin_ssl_protocols   = ["TLSv1.1"]
@@ -374,39 +276,10 @@ resource "aws_cloudfront_distribution" "short_urls_cloudfront" {
       }
     }
 
-    lambda_function_association {
-      event_type = "origin-response"
-      lambda_arn = "${aws_lambda_function.apply_security_headers.qualified_arn}"
-    }
-
     viewer_protocol_policy = "redirect-to-https"
     min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
-  }
-  ordered_cache_behavior {
-    path_pattern     = "admin*"
-    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "origin-api-${aws_api_gateway_deployment.short_url_api_deployment.id}"
-
-    forwarded_values {
-      query_string = false
-
-      cookies {
-        forward = "none"
-      }
-    }
-
-    lambda_function_association {
-      event_type = "origin-response"
-      lambda_arn = "${aws_lambda_function.apply_security_headers.qualified_arn}"
-    }
-
-    viewer_protocol_policy = "https-only"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
+    default_ttl            = 0
+    max_ttl                = 0
   }
 
   restrictions {
@@ -425,13 +298,50 @@ resource "aws_cloudfront_distribution" "short_urls_cloudfront" {
   }
 }
 
+resource "aws_ssm_parameter" "web" {
+  name        = "/${replace(var.short_url_domain,".","")}/web"
+  type        = "String"
+  value       = "${var.base_domain_url}"
+  description = "The URL redirected to by the base short domain."
+}
 
-output "Short URL Doamin" {
+resource "aws_ssm_parameter" "error" {
+  name        = "/${replace(var.short_url_domain,".","")}/error"
+  type        = "String"
+  value       = "${var.default_url}"
+  description = "The default URL if no short URL corresponds to GET request."
+}
+
+resource "aws_s3_bucket_object" "web" {
+  bucket            = "${aws_s3_bucket.short_urls_bucket.bucket}"
+  key               = "web"
+  acl               = "public-read"
+  website_redirect  = "${var.base_domain_url}"
+}
+
+resource "aws_s3_bucket_object" "error" {
+  bucket            = "${aws_s3_bucket.short_urls_bucket.bucket}"
+  key               = "error"
+  acl               = "public-read"
+  website_redirect  = "${var.default_url}"
+}
+
+output "ShortURLDomain" {
   value = "${var.short_url_domain}"
 }
-output "CloudFront Domain Name" {
-  value = "${aws_cloudfront_distribution.short_urls_cloudfront.domain_name}"
+
+output "BaseDomainURL" {
+  value = "${var.base_domain_url}"
 }
-output "Admin API Key" {
-  value = "${aws_api_gateway_api_key.short_urls_admin_api_key.value}"
+
+output "DefaultURL" {
+  value = "${var.default_url}"
+}
+
+output "ParameterPrefix" {
+  value = "${replace(var.short_url_domain,".","")}"
+}
+
+output "Region" {
+  value = "${var.region}"
 }

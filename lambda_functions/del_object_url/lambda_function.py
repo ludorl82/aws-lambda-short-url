@@ -1,13 +1,12 @@
 import json
 import boto3
+import os
 
 def lambda_handler(event, context):
-    ssm     = boto3.client('ssm')
-    pre     = ssm.get_parameter(Name='/urls/params/pre')['Parameter']['Value']
-    bucket  = ssm.get_parameter(Name='/urls/params/bucket')['Parameter']['Value']
-    key     = event['detail']['name'].replace('/urls/' + pre + '/','')
+    if '/' + os.getenv('PRE') + '/' in event['detail']['name']:
+        key     = event['detail']['name'].replace('/' + os.getenv('PRE') + '/','')
 
-    s3 = boto3.client('s3')
-    s3.delete_object(Bucket=bucket, Key=key)
+        s3 = boto3.client('s3')
+        s3.delete_object(Bucket=os.getenv('DOMAIN'), Key=key)
 
     return {'statusCode': 200}

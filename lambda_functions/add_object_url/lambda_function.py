@@ -1,16 +1,15 @@
 import json
 import boto3
+import os
 
 def lambda_handler(event, context):
-    ssm     = boto3.client('ssm')
-    pre     = ssm.get_parameter(Name='/urls/params/pre')['Parameter']['Value']
-    bucket  = ssm.get_parameter(Name='/urls/params/bucket')['Parameter']['Value']
-    
-    if '/urls/' + pre + '/' in event['detail']['name']:
-        key = event['detail']['name'].replace('/urls/' + pre + '/','')
+    if '/' + os.getenv('PRE') + '/' in event['detail']['name']:
+        key = event['detail']['name'].replace('/' + os.getenv('PRE') + '/','')
+
+        ssm = boto3.client('ssm')
         url = ssm.get_parameter(Name=event['detail']['name'])['Parameter']['Value']
     
         s3 = boto3.client('s3')
-        s3.put_object(ACL='public-read', Bucket=bucket, Key=key, WebsiteRedirectLocation=url)
+        s3.put_object(ACL='public-read', Bucket=os.getenv('DOMAIN'), Key=key, WebsiteRedirectLocation=url)
 
     return {'statusCode': 200}
