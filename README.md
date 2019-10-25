@@ -15,7 +15,7 @@ Setup the domain that you want to use for your short URLs as a hosted zone in Ro
 
 This Terraform plan was built and tested with Terraform v0.12.12. It should work with anything at or above that. Terraform is available for download [here](https://www.terraform.io/downloads.html).
 
-The aws cli used in this document is aws-cli/1.14.44. Instructions for installing the latest aws cli can be found [here](https://docs.aws.amazon.com/en_us/cli/latest/userguide/cli-chap-install.html).
+The aws cli used in this document is aws-cli/1.14.44. Instructions for installing the latest aws cli can be found [here](https://docs.aws.amazon.com/en_us/cli/latest/userguide/cli-chap-install.html). The minimum required permissions to run this plan can be found [here](https://github.com/ludorl82/aws-lambda-short-url/blob/master/terraform-urls-policy.json).
 
 ## Deploy
 
