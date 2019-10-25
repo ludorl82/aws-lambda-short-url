@@ -2,3 +2,4 @@
 *.tfvars
 *.zip
 .terraform
+terraform.tf
